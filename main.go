@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/coredns/coredns/core/dnsserver"
-	_ "github.com/coredns/coredns/core/plugin"
 	"github.com/coredns/coredns/coremain"
 
 	_ "github.com/coredns/rrl/plugins/rrl"
@@ -13,6 +12,7 @@ import (
 var directives = []string{
 	"root",
 	"metadata",
+	"rrl",
 	"cancel",
 	"tls",
 	"proxyproto",
@@ -27,34 +27,26 @@ var directives = []string{
 	"bufsize",
 	"bind",
 	"debug",
-	"trace",
 	"ready",
 	"health",
-	"pprof",
 	"prometheus",
 	"errors",
 	"log",
 	"dnstap",
 	"local",
 	"dns64",
-	"rrl",
-	"acl",
 	"any",
 	"chaos",
-	"loadbalance",
 	"tsig",
 	"cache",
 	"rewrite",
+	"acl",
 	"header",
 	"dnssec",
-	"autopath",
-	"minimal",
-	"template",
-	"transfer",
-	"hosts",
-	"kubernetes",
-	"file",
 	"gslb",
+	"autopath",
+	"hosts",
+	"file",
 	"auto",
 	"secondary",
 	"loop",
@@ -66,7 +58,6 @@ var directives = []string{
 	"on",
 	"sign",
 	"view",
-	"nomad",
 }
 
 func init() {
