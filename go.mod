@@ -1,4 +1,4 @@
-module coredns-plus
+module github.com/ccie57654/coredns-plus
 
 go 1.26.2
 
