@@ -1,4 +1,4 @@
-module github.com/ccie57654/coredns-plus
+module coredns-plus
 
 go 1.26.2
 
@@ -84,4 +84,3 @@ require (
 	gopkg.in/fsnotify.v1 v1.4.7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
