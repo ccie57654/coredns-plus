@@ -79,9 +79,9 @@ import (
 )
 
 var directives = []string{
+	"rrl",
 	"root",
 	"metadata",
-	"rrl",
 	"cancel",
 	"tls",
 	"proxyproto",
@@ -113,6 +113,7 @@ var directives = []string{
 	"header",
 	"dnssec",
 	"autopath",
+	"template",
 	"hosts",
 	"gslb",
 	"file",
