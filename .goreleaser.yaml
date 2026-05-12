@@ -85,9 +85,10 @@ dockers_v2:
 - id: gitaction
   dockerfile: Dockerfile
   images:
-    - ghcr.io/ccie57654/${{ .ProjectName }}
+    - ghcr.io/ccie57654/{{ .ProjectName }}
   sbom: true
   tags:
+    - "latest"
     - "{{ .Tag }}"
   labels:
     "org.opencontainers.image.description": "Custom compilation of CoreDNS"
