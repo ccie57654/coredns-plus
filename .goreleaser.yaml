@@ -18,14 +18,13 @@ gomod:
 builds:
   - main: main.go
     flags:
-    - -work
-    - -v
+      - -trimpath
+      - -work
+      - -v
     env:
       - CGO_ENABLED=0
       - GO111MODULE=on
     mod_timestamp: "{{ .CommitTimestamp }}"
-    flags:
-      - -trimpath
     tags:
       - osusergo
       - netgo
