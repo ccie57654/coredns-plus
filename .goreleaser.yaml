@@ -14,22 +14,23 @@ gomod:
   proxy: true
   env:
     - GOPRIVATE=github.com/ccie57654/*
-  mod: mod
 
 builds:
   - main: main.go
     flags:
-    - -work
-    - -v
+      - -trimpath
+      - -work
+      - -v
     env:
       - CGO_ENABLED=0
       - GO111MODULE=on
+    mod_timestamp: "{{ .CommitTimestamp }}"
     tags:
       - osusergo
       - netgo
       - static_build
     ldflags:
-      - "-s -w -extldflags '-static'"
+      - "-s -w -extldflags '-static' -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{ .CommitDate }}"
     goos:
       - linux
       - windows
@@ -38,28 +39,56 @@ builds:
       - arm64
       - amd64
 
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+source:
+  enabled: true
+  name_template: "{{ .ProjectName }}.src"
+
 archives:
   - formats: [tar.gz]
+    wrap_in_directory: true
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
+      {{- if eq .Arch "amd64" }}x86_64keyless
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end }}
+    builds_info:
+      mtime: "{{ .CommitTimestamp }}"
     # use zip for windows archives
     format_overrides:
       - goos: windows
         formats: [zip]
 
+sboms:
+  - artifacts: archive
+    args: ["$artifact", "--output", "cyclonedx-json=$document"]
+  - id: source
+    artifacts: source
+    args: ["$artifact", "--output", "cyclonedx-json=$document"]
+
+signs:
+  - id: cosign_checksums
+    cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - "sign-blob"
+      - "--bundle=${signature}"
+      - "${artifact}"
+    artifacts: checksum
+    output: true
+
 dockers_v2:
 - id: gitaction
-  dockerfile: Dockerfile.github
+  dockerfile: Dockerfile
   images:
     - ghcr.io/ccie57654/${{ .ProjectName }}
   sbom: true
   tags:
-    - "v{{ .Version }}"
-    - "latest"
+    - "{{ .Tag }}"
   labels:
     "org.opencontainers.image.description": "Custom compilation of CoreDNS"
     "org.opencontainers.image.created": "{{.Date}}"
@@ -70,52 +99,13 @@ dockers_v2:
   platforms:
     - linux/amd64
     - linux/arm64
-- id: localtest
-  dockerfile: Dockerfile
-  images:
-    - ccie57654/${{ .ProjectName }}
-  sbom: false
-  tags:
-    - "v{{ .Version }}"
-    - "latest"
-  labels:
-    "org.opencontainers.image.description": "Custom compilation of CoreDNS"
-    "org.opencontainers.image.created": "{{.Date}}"
-    "org.opencontainers.image.name": "{{.ProjectName}}"
-    "org.opencontainers.image.revision": "{{.FullCommit}}"
-    "org.opencontainers.image.version": "{{.Version}}"
-    "org.opencontainers.image.source": "{{.GitURL}}"
-  platforms:
-    - linux/amd64
   flags:
-    - "--provenance=false"
+    - "--provenance=true"
 
-checksum:
-  name_template: '{{ .ArtifactName }}.{{ .Algorithm }}'
-  algorithm: sha256
-  split: true
-
-sboms:
-  - artifacts: binary
-    documents: ["{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}.sbom.json"]
-    cmd: syft
-    args: ["$artifact", "--output", "cyclonedx-json=$document"]
-
-signs:
-  - id: checksum_sigs
-    artifacts: checksum
-    signature: "${artifact}.sig"
-    cmd: gpg
-    args: ["--output", "${signature}", "--detach-sign", "${artifact}"]
-  - id: sbom_sigs
-    artifacts: sbom
-    signature: "${artifact}.sig"
-    cmd: gpg
-    args: ["--output", "${signature}", "--detach-sign", "${artifact}"]
-
-changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
+docker_signs:
+  - cmd: cosign
+    output: true
+    args:
+      - "sign"
+      - "${artifact}"
+      - "--yes"
