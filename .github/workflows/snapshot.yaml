@@ -24,4 +24,5 @@ jobs:
           version: latest
           args: release --snapshot --clean --skip=sign,publish,docker
         env:
+          GOPRIVATE: "github.com/ccie57654/"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
