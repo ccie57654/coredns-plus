@@ -3,7 +3,7 @@ module github.com/ccie57654/coredns-plus
 go 1.26.2
 
 require (
-	github.com/ccie57654/cdns-gslb-private v0.19.0
+	github.com/ccie57654/cdns-gslb-private v0.20.0
 	github.com/coredns/caddy v1.1.4
 	github.com/coredns/coredns v1.14.3
 	github.com/coredns/rrl v0.0.0-20250915113509-ac1135e077ba
@@ -78,7 +78,7 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.45.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260511170946-3700d4141b60 // indirect
-	google.golang.org/grpc v1.81.0 // indirect
+	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/fsnotify.v1 v1.4.7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
