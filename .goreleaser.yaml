@@ -50,12 +50,7 @@ source:
 archives:
   - formats: [tar.gz]
     wrap_in_directory: true
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
     builds_info:
       mtime: "{{ .CommitTimestamp }}"
     # use zip for windows archives
