@@ -4,9 +4,8 @@ import (
 	"github.com/coredns/coredns/core/dnsserver"
 	"github.com/coredns/coredns/coremain"
 
-	_ "github.com/ccie57654/cdns-gslb-private"
 	_ "github.com/coredns/rrl/plugins/rrl"
-	_ "github.com/hmonsalv/coredns-doh"
+	_ "github.com/dmachard/coredns-gslb"
 
 	// Include all plugins.
 	_ "github.com/coredns/caddy/onevent"
@@ -120,7 +119,6 @@ var directives = []string{
 	"auto",
 	"secondary",
 	"loop",
-	"doh",
 	"forward",
 	"grpc",
 	"erratic",
