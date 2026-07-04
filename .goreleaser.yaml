@@ -11,9 +11,7 @@ before:
     - go mod download
 
 gomod:
-  proxy: true
-  env:
-    - GOPRIVATE=github.com/ccie57654/*
+  proxy: false
 
 builds:
   - main: main.go
@@ -21,6 +19,7 @@ builds:
       - -trimpath
       - -work
       - -v
+      - -mod=vendor
     env:
       - CGO_ENABLED=0
       - GO111MODULE=on
