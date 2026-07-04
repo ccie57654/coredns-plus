@@ -82,5 +82,3 @@ require (
 	gopkg.in/fsnotify.v1 v1.4.7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/coredns/coredns v1.14.5-0.20260630110512-33266a45c794 => github.com/ccie57654/coredns v0.0.0-20260630040837-3980fccf1698

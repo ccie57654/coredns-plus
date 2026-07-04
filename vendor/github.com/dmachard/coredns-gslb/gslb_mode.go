@@ -1,0 +1,474 @@
+package gslb
+
+import (
+	"fmt"
+	"math"
+	"math/rand"
+	"net"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/miekg/dns"
+)
+
+// pickBackendWithFailover returns all healthy backends with the lowest priority.
+func (g *GSLB) pickBackendWithFailover(record *Record, recordType uint16) ([]string, error) {
+	sortedBackends := make([]BackendInterface, len(record.Backends))
+	copy(sortedBackends, record.Backends)
+	sort.Slice(sortedBackends, func(i, j int) bool {
+		return sortedBackends[i].GetPriority() < sortedBackends[j].GetPriority()
+	})
+
+	minPriority := -1
+	var healthyIPs []string
+	for _, backend := range sortedBackends {
+		if backend.IsHealthy() {
+			ip := backend.GetAddress()
+			if (recordType == dns.TypeA && net.ParseIP(ip).To4() != nil) ||
+				(recordType == dns.TypeAAAA && net.ParseIP(ip).To16() != nil && net.ParseIP(ip).To4() == nil) {
+				if minPriority == -1 {
+					minPriority = backend.GetPriority()
+				}
+				if backend.GetPriority() == minPriority {
+					healthyIPs = append(healthyIPs, ip)
+					IncBackendSelected(record.Fqdn, ip)
+				} else {
+					break // stop at first higher priority
+				}
+			}
+		}
+	}
+
+	if len(healthyIPs) == 0 {
+		return nil, fmt.Errorf("no healthy backends in failover mode for type %d", recordType)
+	}
+
+	return healthyIPs, nil
+}
+
+// pickBackendWithRoundRobin returns one healthy backend in round-robin order.
+func (g *GSLB) pickBackendWithRoundRobin(domain string, record *Record, recordType uint16) ([]string, error) {
+	g.Mutex.Lock()
+	defer g.Mutex.Unlock()
+
+	var index int
+	value, exists := g.RoundRobinIndex.Load(domain)
+	if exists {
+		index = value.(int)
+	}
+
+	healthyBackends := []BackendInterface{}
+	for _, backend := range record.Backends {
+		if backend.IsHealthy() {
+			ip := backend.GetAddress()
+			if (recordType == dns.TypeA && net.ParseIP(ip).To4() != nil) ||
+				(recordType == dns.TypeAAAA && net.ParseIP(ip).To16() != nil && net.ParseIP(ip).To4() == nil) {
+				healthyBackends = append(healthyBackends, backend)
+			}
+		}
+	}
+
+	if len(healthyBackends) == 0 {
+		return nil, fmt.Errorf("no healthy backends in round-robin mode for type %d", recordType)
+	}
+
+	selectedBackend := healthyBackends[index%len(healthyBackends)]
+	g.RoundRobinIndex.Store(domain, (index+1)%len(healthyBackends))
+	IncBackendSelected(record.Fqdn, selectedBackend.GetAddress())
+
+	return []string{selectedBackend.GetAddress()}, nil
+}
+
+// pickBackendWithRandom returns all healthy backends in random order.
+func (g *GSLB) pickBackendWithRandom(record *Record, recordType uint16) ([]string, error) {
+	g.Mutex.Lock()
+	defer g.Mutex.Unlock()
+
+	healthyBackends := []BackendInterface{}
+	for _, backend := range record.Backends {
+		if backend.IsHealthy() {
+			ip := backend.GetAddress()
+			if (recordType == dns.TypeA && net.ParseIP(ip).To4() != nil) ||
+				(recordType == dns.TypeAAAA && net.ParseIP(ip).To16() != nil && net.ParseIP(ip).To4() == nil) {
+				healthyBackends = append(healthyBackends, backend)
+			}
+		}
+	}
+
+	if len(healthyBackends) == 0 {
+		return nil, fmt.Errorf("no healthy backends in random mode for type %d", recordType)
+	}
+
+	// Shuffle healthy backends to create random order
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	r.Shuffle(len(healthyBackends), func(i, j int) {
+		healthyBackends[i], healthyBackends[j] = healthyBackends[j], healthyBackends[i]
+	})
+
+	// Collect the shuffled IPs
+	addresses := []string{}
+	for _, backend := range healthyBackends {
+		addresses = append(addresses, backend.GetAddress())
+		IncBackendSelected(record.Fqdn, backend.GetAddress())
+	}
+
+	return addresses, nil
+}
+
+// pickBackendWithWeighted returns one healthy backend, selected proportionally to its weight.
+func (g *GSLB) pickBackendWithWeighted(record *Record, recordType uint16) ([]string, error) {
+	var weightedBackends []BackendInterface
+	var totalWeight int
+	for _, backend := range record.Backends {
+		if backend.IsHealthy() && backend.IsEnabled() {
+			ip := backend.GetAddress()
+			if (recordType == dns.TypeA && net.ParseIP(ip).To4() != nil) ||
+				(recordType == dns.TypeAAAA && net.ParseIP(ip).To16() != nil && net.ParseIP(ip).To4() == nil) {
+				w := backend.GetWeight()
+				if w > 0 {
+					weightedBackends = append(weightedBackends, backend)
+					totalWeight += w
+				}
+			}
+		}
+	}
+	if len(weightedBackends) == 0 || totalWeight == 0 {
+		return nil, fmt.Errorf("no healthy backends with weight > 0 for type %d", recordType)
+	}
+	// Roulette wheel selection
+	randVal := rand.Intn(totalWeight)
+	cumulative := 0
+	for _, backend := range weightedBackends {
+		cumulative += backend.GetWeight()
+		if randVal < cumulative {
+			IncBackendSelected(record.Fqdn, backend.GetAddress())
+			return []string{backend.GetAddress()}, nil
+		}
+	}
+	// Should not reach here
+	return nil, fmt.Errorf("weighted selection failed")
+}
+
+// pickBackendWithGeoIP implements advanced GeoIP routing: country, city, ASN, custom location, with fallback to failover.
+func (g *GSLB) pickBackendWithGeoIP(record *Record, recordType uint16, clientIP net.IP) ([]string, error) {
+	// 1. Geo hierarchy with city DB (city -> subdivision -> country -> continent)
+	if g.GeoIPCityDB != nil {
+		recordCity, err := g.GeoIPCityDB.City(clientIP)
+		if err == nil && recordCity != nil {
+			clientLatitude := recordCity.Location.Latitude
+			clientLongitude := recordCity.Location.Longitude
+			if nearest, ok := g.pickNearestBackendByCoordinates(record, recordType, clientLatitude, clientLongitude); ok {
+				IncBackendSelected(record.Fqdn, nearest)
+				return []string{nearest}, nil
+			}
+
+			cityName := ""
+			if recordCity.City.Names != nil {
+				cityName = recordCity.City.Names["en"]
+			}
+			subdivisionCode := ""
+			if len(recordCity.Subdivisions) > 0 {
+				subdivisionCode = strings.ToUpper(recordCity.Subdivisions[0].IsoCode)
+			}
+			continentCode := recordCity.Continent.Code
+			countryCode := strings.ToUpper(recordCity.Country.IsoCode)
+
+			// 1.a city
+			if cityName != "" {
+				var cityCountrySubdivisionIPs []string
+				var cityCountryIPs []string
+				var cityOnlyIPs []string
+				for _, backend := range record.Backends {
+					if !backend.IsHealthy() || !backend.IsEnabled() {
+						continue
+					}
+
+					if !strings.EqualFold(backend.GetCity(), cityName) {
+						continue
+					}
+
+					backendContinent := backend.GetContinent()
+					backendCountry := strings.ToUpper(backend.GetCountry())
+					backendSubdivision := strings.ToUpper(backend.GetSubdivision())
+
+					// If backend provides a continent hint, it must match client geo.
+					if backendContinent != "" && backendContinent != continentCode {
+						continue
+					}
+
+					// If backend provides country/subdivision hints, they must match client geo.
+					if backendCountry != "" && backendCountry != countryCode {
+						continue
+					}
+					if backendSubdivision != "" && backendSubdivision != subdivisionCode {
+						continue
+					}
+
+					switch {
+					case backendCountry != "" && backendSubdivision != "":
+						cityCountrySubdivisionIPs = append(cityCountrySubdivisionIPs, backend.GetAddress())
+					case backendCountry != "":
+						cityCountryIPs = append(cityCountryIPs, backend.GetAddress())
+					default:
+						cityOnlyIPs = append(cityOnlyIPs, backend.GetAddress())
+					}
+				}
+
+				switch {
+				case len(cityCountrySubdivisionIPs) > 0:
+					for _, ip := range cityCountrySubdivisionIPs {
+						IncBackendSelected(record.Fqdn, ip)
+					}
+					return cityCountrySubdivisionIPs, nil
+				case len(cityCountryIPs) > 0:
+					for _, ip := range cityCountryIPs {
+						IncBackendSelected(record.Fqdn, ip)
+					}
+					return cityCountryIPs, nil
+				case len(cityOnlyIPs) > 0:
+					for _, ip := range cityOnlyIPs {
+						IncBackendSelected(record.Fqdn, ip)
+					}
+					return cityOnlyIPs, nil
+				}
+			}
+
+			// 1.b subdivision
+			if subdivisionCode != "" {
+				var subdivisionMatchedIPs []string
+				for _, backend := range record.Backends {
+					if !backend.IsHealthy() || !backend.IsEnabled() {
+						continue
+					}
+					backendContinent := backend.GetContinent()
+					if backendContinent != "" && backendContinent != continentCode {
+						continue
+					}
+					if strings.ToUpper(backend.GetSubdivision()) != subdivisionCode {
+						continue
+					}
+					// If backend declares a country, it must match client country.
+					if backend.GetCountry() != "" && !strings.EqualFold(backend.GetCountry(), countryCode) {
+						continue
+					}
+					subdivisionMatchedIPs = append(subdivisionMatchedIPs, backend.GetAddress())
+				}
+				if len(subdivisionMatchedIPs) > 0 {
+					for _, ip := range subdivisionMatchedIPs {
+						IncBackendSelected(record.Fqdn, ip)
+					}
+					return subdivisionMatchedIPs, nil
+				}
+			}
+
+			// 1.c country
+			if countryCode != "" {
+				var countryMatchedIPs []string
+				for _, backend := range record.Backends {
+					if !backend.IsHealthy() || !backend.IsEnabled() {
+						continue
+					}
+					backendContinent := backend.GetContinent()
+					if backendContinent != "" && backendContinent != continentCode {
+						continue
+					}
+					if strings.EqualFold(backend.GetCountry(), countryCode) {
+						countryMatchedIPs = append(countryMatchedIPs, backend.GetAddress())
+					}
+				}
+				if len(countryMatchedIPs) > 0 {
+					for _, ip := range countryMatchedIPs {
+						IncBackendSelected(record.Fqdn, ip)
+					}
+					return countryMatchedIPs, nil
+				}
+			}
+
+			// 1.d continent
+			if continentCode != "" {
+				var continentMatchedIPs []string
+				for _, backend := range record.Backends {
+					if !backend.IsHealthy() || !backend.IsEnabled() {
+						continue
+					}
+					if backend.GetContinent() == continentCode {
+						continentMatchedIPs = append(continentMatchedIPs, backend.GetAddress())
+					}
+				}
+				if len(continentMatchedIPs) > 0 {
+					for _, ip := range continentMatchedIPs {
+						IncBackendSelected(record.Fqdn, ip)
+					}
+					return continentMatchedIPs, nil
+				}
+			}
+		}
+	}
+
+	// 2. Country-based routing with country DB (for country-only setups)
+	if g.GeoIPCountryDB != nil {
+		recordCountry, err := g.GeoIPCountryDB.Country(clientIP)
+		if err == nil && recordCountry != nil {
+			countryCode := strings.ToUpper(recordCountry.Country.IsoCode)
+			continentCode := recordCountry.Continent.Code
+			var matchedIPs []string
+			if countryCode != "" {
+				for _, backend := range record.Backends {
+					if backend.IsHealthy() && backend.IsEnabled() {
+						backendContinent := backend.GetContinent()
+						if backendContinent != "" && backendContinent != continentCode {
+							continue
+						}
+						if strings.EqualFold(backend.GetCountry(), countryCode) {
+							matchedIPs = append(matchedIPs, backend.GetAddress())
+						}
+					}
+				}
+			}
+			if len(matchedIPs) > 0 {
+				for _, ip := range matchedIPs {
+					IncBackendSelected(record.Fqdn, ip)
+				}
+				return matchedIPs, nil
+			}
+
+			// 2.b continent (country DB also provides continent metadata)
+			if continentCode != "" {
+				for _, backend := range record.Backends {
+					if backend.IsHealthy() && backend.IsEnabled() {
+						if backend.GetContinent() == continentCode {
+							matchedIPs = append(matchedIPs, backend.GetAddress())
+						}
+					}
+				}
+			}
+			if len(matchedIPs) > 0 {
+				for _, ip := range matchedIPs {
+					IncBackendSelected(record.Fqdn, ip)
+				}
+				return matchedIPs, nil
+			}
+		}
+	}
+
+	// 3. ASN-based routing (if ASN DB loaded)
+	if g.GeoIPASNDB != nil {
+		recordASN, err := g.GeoIPASNDB.ASN(clientIP)
+		if err == nil && recordASN != nil && recordASN.AutonomousSystemNumber != 0 {
+			asn := fmt.Sprint(recordASN.AutonomousSystemNumber)
+			var matchedIPs []string
+			for _, backend := range record.Backends {
+				if backend.IsHealthy() && backend.IsEnabled() {
+					if backend.GetASN() == asn {
+						matchedIPs = append(matchedIPs, backend.GetAddress())
+						IncBackendSelected(record.Fqdn, backend.GetAddress())
+						break
+					}
+				}
+			}
+			if len(matchedIPs) > 0 {
+				return matchedIPs, nil
+			}
+		}
+	}
+
+	// 4. Custom location map (subnet to location string)
+	g.Mutex.RLock()
+	locationMap := g.LocationMap
+	g.Mutex.RUnlock()
+	if len(locationMap) > 0 {
+		var matchedIPs []string
+		for _, backend := range record.Backends {
+			if backend.IsHealthy() && backend.IsEnabled() {
+				loc := backend.GetLocation()
+				for subnet, location := range locationMap {
+					_, ipnet, err := net.ParseCIDR(subnet)
+					if err == nil && ipnet.Contains(clientIP) {
+						if loc == location {
+							matchedIPs = append(matchedIPs, backend.GetAddress())
+							IncBackendSelected(record.Fqdn, backend.GetAddress())
+							break
+						}
+						break
+					}
+				}
+			}
+		}
+		if len(matchedIPs) > 0 {
+			return matchedIPs, nil
+		}
+	}
+
+	// 5. Fallback: failover (priority order)
+	return g.pickBackendWithFailover(record, recordType)
+}
+
+func isAddressTypeCompatible(ip string, recordType uint16) bool {
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return false
+	}
+	if recordType == dns.TypeA {
+		return parsedIP.To4() != nil
+	}
+	if recordType == dns.TypeAAAA {
+		return parsedIP.To16() != nil && parsedIP.To4() == nil
+	}
+	return false
+}
+
+func (g *GSLB) pickNearestBackendByCoordinates(record *Record, recordType uint16, clientLatitude, clientLongitude float64) (string, bool) {
+	clientLatitudeRad := clientLatitude * math.Pi / 180
+	clientLongitudeRad := clientLongitude * math.Pi / 180
+
+	bestAddress := ""
+	bestDistance := 0.0
+	bestPriority := 0
+	found := false
+
+	for _, backend := range record.Backends {
+		if !backend.IsHealthy() || !backend.IsEnabled() || !backend.HasGeoCoordinates() {
+			continue
+		}
+		address := backend.GetAddress()
+		if !isAddressTypeCompatible(address, recordType) {
+			continue
+		}
+
+		distance := haversineDistanceRad(clientLatitudeRad, clientLongitudeRad, backend.GetLatitudeRad(), backend.GetLongitudeRad())
+		priority := backend.GetPriority()
+		if !found {
+			bestAddress = address
+			bestDistance = distance
+			bestPriority = priority
+			found = true
+			continue
+		}
+		if distance < bestDistance ||
+			(distance == bestDistance && (priority < bestPriority ||
+				(priority == bestPriority && address < bestAddress))) {
+			bestAddress = address
+			bestDistance = distance
+			bestPriority = priority
+		}
+	}
+
+	if !found {
+		return "", false
+	}
+	return bestAddress, true
+}
+
+func haversineDistanceRad(lat1Rad, lon1Rad, lat2Rad, lon2Rad float64) float64 {
+	const earthRadiusKm = 6371.0
+
+	deltaLat := lat2Rad - lat1Rad
+	deltaLon := lon2Rad - lon1Rad
+
+	a := math.Sin(deltaLat/2)*math.Sin(deltaLat/2) +
+		math.Cos(lat1Rad)*math.Cos(lat2Rad)*math.Sin(deltaLon/2)*math.Sin(deltaLon/2)
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+
+	return earthRadiusKm * c
+}
