@@ -11,7 +11,7 @@ before:
     - go mod download
 
 gomod:
-  proxy: false
+  proxy: true
 
 builds:
   - main: main.go
@@ -19,7 +19,6 @@ builds:
       - -trimpath
       - -work
       - -v
-      - -mod=vendor
     env:
       - CGO_ENABLED=0
       - GO111MODULE=on
@@ -58,8 +57,6 @@ archives:
         formats: [zip]
 
 sboms:
-  - artifacts: archive
-    args: ["$artifact", "--output", "cyclonedx-json=$document"]
   - id: source
     artifacts: source
     args: ["$artifact", "--output", "cyclonedx-json=$document"]
@@ -84,7 +81,7 @@ dockers_v2:
   tags:
     - "latest"
     - "{{ .Tag }}"
-  labels:
+  annotations:
     "org.opencontainers.image.description": "Custom compilation of CoreDNS"
     "org.opencontainers.image.created": "{{.Date}}"
     "org.opencontainers.image.name": "{{.ProjectName}}"

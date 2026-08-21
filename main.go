@@ -8,7 +8,7 @@ import (
 	_ "github.com/dmachard/coredns-gslb"
 
 	// Include all plugins.
-	_ "github.com/coredns/caddy/onevent"
+	//_ "github.com/coredns/caddy/onevent"
 	_ "github.com/coredns/coredns/plugin/acl"
 	_ "github.com/coredns/coredns/plugin/any"
 	_ "github.com/coredns/coredns/plugin/auto"
@@ -19,8 +19,8 @@ import (
 	_ "github.com/coredns/coredns/plugin/bufsize"
 	_ "github.com/coredns/coredns/plugin/cache"
 	_ "github.com/coredns/coredns/plugin/cancel"
-	_ "github.com/coredns/coredns/plugin/chaos"
 
+	//_ "github.com/coredns/coredns/plugin/chaos"
 	//_ "github.com/coredns/coredns/plugin/clouddns"
 	_ "github.com/coredns/coredns/plugin/debug"
 	_ "github.com/coredns/coredns/plugin/dns64"
@@ -35,7 +35,7 @@ import (
 
 	//_ "github.com/coredns/coredns/plugin/geoip"
 	_ "github.com/coredns/coredns/plugin/grpc"
-	_ "github.com/coredns/coredns/plugin/grpc_server"
+	//_ "github.com/coredns/coredns/plugin/grpc_server"
 	_ "github.com/coredns/coredns/plugin/header"
 	_ "github.com/coredns/coredns/plugin/health"
 	_ "github.com/coredns/coredns/plugin/hosts"
@@ -44,18 +44,19 @@ import (
 
 	//_ "github.com/coredns/coredns/plugin/k8s_external"
 	//_ "github.com/coredns/coredns/plugin/kubernetes"
-	_ "github.com/coredns/coredns/plugin/loadbalance"
+	//_ "github.com/coredns/coredns/plugin/loadbalance"
 	_ "github.com/coredns/coredns/plugin/local"
 	_ "github.com/coredns/coredns/plugin/log"
 	_ "github.com/coredns/coredns/plugin/loop"
 	_ "github.com/coredns/coredns/plugin/metadata"
 	_ "github.com/coredns/coredns/plugin/metrics"
+
 	_ "github.com/coredns/coredns/plugin/minimal"
 	_ "github.com/coredns/coredns/plugin/multisocket"
 
 	//_ "github.com/coredns/coredns/plugin/nomad"
 	_ "github.com/coredns/coredns/plugin/nsid"
-	_ "github.com/coredns/coredns/plugin/pprof"
+	//_ "github.com/coredns/coredns/plugin/pprof"
 	_ "github.com/coredns/coredns/plugin/proxyproto"
 	_ "github.com/coredns/coredns/plugin/quic"
 	_ "github.com/coredns/coredns/plugin/ready"
@@ -65,6 +66,7 @@ import (
 
 	//_ "github.com/coredns/coredns/plugin/route53"
 	_ "github.com/coredns/coredns/plugin/secondary"
+	_ "github.com/coredns/coredns/plugin/shed"
 	_ "github.com/coredns/coredns/plugin/sign"
 	_ "github.com/coredns/coredns/plugin/template"
 	_ "github.com/coredns/coredns/plugin/timeouts"
@@ -82,10 +84,8 @@ var directives = []string{
 	"root",
 	"metadata",
 	"cancel",
-	"tls",
 	"proxyproto",
 	"quic",
-	"grpc_server",
 	"https",
 	"https3",
 	"timeouts",
@@ -97,6 +97,7 @@ var directives = []string{
 	"debug",
 	"ready",
 	"health",
+	"shed",
 	"prometheus",
 	"errors",
 	"log",
@@ -104,15 +105,16 @@ var directives = []string{
 	"local",
 	"dns64",
 	"any",
-	"chaos",
 	"tsig",
-	"cache",
 	"rewrite",
+	"autopath",
 	"acl",
+	"cache",
 	"header",
 	"dnssec",
-	"autopath",
+	"tls",
 	"template",
+	"transfer",
 	"hosts",
 	"gslb",
 	"file",
