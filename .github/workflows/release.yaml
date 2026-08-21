@@ -37,9 +37,7 @@ jobs:
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: ./dist/checksums.txt
+          sbom-path: ./dist/coredns-plus.src.tar.gz.sbom.json
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: ./dist/digests.txt
-      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          sbom-path: ./dist/coredns-plus.src.tar.gz.sbom.json
