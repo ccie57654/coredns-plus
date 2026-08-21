@@ -1,0 +1,336 @@
+package gslb
+
+import (
+	"fmt"
+	"net"
+	"os"
+	"strings"
+
+	"github.com/dmachard/coredns-gslb/pkg/config"
+	"gopkg.in/yaml.v3"
+)
+
+// UnmarshalYAML implements custom YAML unmarshaling to handle healthcheck_profiles
+func (g *GSLB) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw struct {
+		Records             map[string]interface{}  `yaml:"records"`
+		HealthcheckProfiles map[string]*HealthCheck `yaml:"healthcheck_profiles"`
+	}
+
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+
+	// Store healthcheck profiles
+	if raw.HealthcheckProfiles != nil {
+		g.HealthcheckProfiles = raw.HealthcheckProfiles
+	}
+
+	// Process records with healthcheck profile resolution
+	if raw.Records != nil {
+		if g.Records == nil {
+			g.Records = make(map[string]map[string]*Record)
+		}
+		zone := g.Zone // zone attendue, ex: ".example.org."
+		if g.Records[zone] == nil {
+			g.Records[zone] = make(map[string]*Record)
+		}
+		for fqdn, recordData := range raw.Records {
+			if zone != "" && !strings.HasSuffix(fqdn, zone) {
+				return fmt.Errorf("record %s does not match zone %s", fqdn, zone)
+			}
+			// Pre-process the record data to resolve healthcheck profiles
+			processedRecordData, err := g.processRecordHealthchecks(recordData)
+			if err != nil {
+				return fmt.Errorf("error processing record %s: %w", fqdn, err)
+			}
+
+			// Marshal and unmarshal the processed data to create the Record
+			recordBytes, err := yaml.Marshal(processedRecordData)
+			if err != nil {
+				return fmt.Errorf("failed to marshal processed record %s: %w", fqdn, err)
+			}
+
+			var record Record
+			if err := yaml.Unmarshal(recordBytes, &record); err != nil {
+				return fmt.Errorf("failed to unmarshal record %s: %w", fqdn, err)
+			}
+
+			record.Fqdn = fqdn
+			g.Records[zone][fqdn] = &record
+		}
+	}
+
+	return nil
+}
+
+// processRecordHealthchecks processes a record to resolve healthcheck profile references
+func (g *GSLB) processRecordHealthchecks(recordData interface{}) (interface{}, error) {
+	recordMap, ok := recordData.(map[string]interface{})
+	if !ok {
+		return recordData, nil
+	}
+
+	backends, exists := recordMap["backends"]
+	if !exists {
+		return recordData, nil
+	}
+
+	backendsList, ok := backends.([]interface{})
+	if !ok {
+		return recordData, nil
+	}
+
+	// Process each backend
+	for i, backend := range backendsList {
+		backendMap, ok := backend.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		healthchecks, exists := backendMap["healthchecks"]
+		if !exists {
+			continue
+		}
+
+		// Also check if any profile or inline healthcheck has rise/fall
+		var profileRise, profileFall int
+		if hc, ok := healthchecks.([]interface{}); ok {
+			for _, item := range hc {
+				switch v := item.(type) {
+				case string:
+					profile, err := ResolveHealthcheckProfile(v, g.HealthcheckProfiles)
+					if err == nil {
+						if profile.Rise > 0 {
+							profileRise = profile.Rise
+						}
+						if profile.Fall > 0 {
+							profileFall = profile.Fall
+						}
+					}
+				case map[string]interface{}:
+					if r, ok := v["rise"].(int); ok && r > 0 {
+						profileRise = r
+					} else if rVal, ok := v["rise"].(int64); ok && rVal > 0 {
+						profileRise = int(rVal)
+					}
+					if f, ok := v["fall"].(int); ok && f > 0 {
+						profileFall = f
+					} else if fVal, ok := v["fall"].(int64); ok && fVal > 0 {
+						profileFall = int(fVal)
+					}
+				}
+			}
+		}
+
+		if _, hasRise := backendMap["rise"]; !hasRise && profileRise > 0 {
+			backendMap["rise"] = profileRise
+		}
+		if _, hasFall := backendMap["fall"]; !hasFall && profileFall > 0 {
+			backendMap["fall"] = profileFall
+		}
+
+		processedHealthchecks, err := g.processHealthchecks(healthchecks)
+		if err != nil {
+			return nil, err
+		}
+
+		backendMap["healthchecks"] = processedHealthchecks
+		backendsList[i] = backendMap
+	}
+
+	recordMap["backends"] = backendsList
+	return recordMap, nil
+}
+
+// processHealthchecks processes healthchecks to resolve profile references
+func (g *GSLB) processHealthchecks(healthchecks interface{}) ([]interface{}, error) {
+	var result []interface{}
+
+	switch hc := healthchecks.(type) {
+	case []interface{}:
+		for _, item := range hc {
+			switch v := item.(type) {
+			case string:
+				// It's a profile reference
+				profile, err := ResolveHealthcheckProfile(v, g.HealthcheckProfiles)
+				if err != nil {
+					return nil, err
+				}
+				result = append(result, map[string]interface{}{
+					"type":   profile.Type,
+					"params": profile.Params,
+				})
+			default:
+				// It's a full healthcheck object
+				result = append(result, item)
+			}
+		}
+	default:
+		return nil, fmt.Errorf("healthchecks must be an array")
+	}
+
+	return result, nil
+}
+
+func (g *GSLB) rebuildLocationMapIPNet() {
+	g.LocationMapIPNet = make([]CustomSubnet, 0, len(g.LocationMap))
+	for subnet, location := range g.LocationMap {
+		_, ipnet, err := net.ParseCIDR(subnet)
+		if err == nil {
+			g.LocationMapIPNet = append(g.LocationMapIPNet, CustomSubnet{
+				Subnet:   subnet,
+				IPNet:    ipnet,
+				Location: location,
+			})
+		}
+	}
+}
+
+func (g *GSLB) loadCustomLocationsMap(path string) error {
+	g.Mutex.Lock()
+	defer g.Mutex.Unlock()
+	if path == "" {
+		g.LocationMap = nil
+		g.LocationMapIPNet = nil
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read location map: %w", err)
+	}
+
+	m, errs := config.ParseAndValidateLocationMap(data)
+	if len(errs) > 0 {
+		return fmt.Errorf("invalid custom location map: %s", strings.Join(errs, "; "))
+	}
+
+	g.LocationMap = m
+	g.rebuildLocationMapIPNet()
+	return nil
+}
+
+func loadConfigFile(gslb *GSLB, fileName string, zone string) error {
+	if !strings.HasSuffix(zone, ".") {
+		zone += "."
+	}
+	data, err := os.ReadFile(fileName)
+	if err != nil {
+		return fmt.Errorf("failed to read YAML configuration: %w", err)
+	}
+	if len(data) == 0 {
+		return fmt.Errorf("failed to read YAML configuration: file empty")
+	}
+
+	// 1. Parse YAML into config DTO model
+	zoneCfg, err := config.LoadZoneConfig(data)
+	if err != nil {
+		return fmt.Errorf("failed to load zone config: %w", err)
+	}
+
+	// 2. Perform semantic validation
+	validLocations := make(map[string]bool)
+	if gslb.LocationMap != nil {
+		for _, loc := range gslb.LocationMap {
+			validLocations[loc] = true
+		}
+	}
+
+	globalProfiles := make(map[string]config.HealthcheckProfile)
+	ProfilesMutex.RLock()
+	for name, hc := range GlobalHealthcheckProfiles {
+		globalProfiles[name] = config.HealthcheckProfile{
+			Type:   hc.Type,
+			Params: hc.Params,
+			Rise:   hc.Rise,
+			Fall:   hc.Fall,
+		}
+	}
+	ProfilesMutex.RUnlock()
+
+	valErrs, valWarns := zoneCfg.Validate(validLocations, globalProfiles)
+
+	// Log warnings
+	for _, w := range valWarns {
+		log.Warningf("[gslb config warning] %s", w)
+	}
+
+	// Check for duplicate record names across other zones
+	for fqdn := range zoneCfg.Records {
+		if zone != "" && !strings.HasSuffix(fqdn, zone) {
+			valErrs = append(valErrs, fmt.Sprintf("record %s does not match zone %s", fqdn, zone))
+		}
+		for zName, recs := range gslb.Records {
+			if zName != zone {
+				if _, exists := recs[fqdn]; exists {
+					valErrs = append(valErrs, fmt.Sprintf("duplicate record name '%s' defined in zone '%s' and zone '%s'", fqdn, zone, zName))
+				}
+			}
+		}
+	}
+
+	// If there are errors, return them to block startup/reload
+	if len(valErrs) > 0 {
+		return fmt.Errorf("configuration validation failed: %s", strings.Join(valErrs, "; "))
+	}
+
+	// 3. Since config is fully validated and parsed, instantiate active runtime objects
+	var raw struct {
+		Defaults            map[string]interface{}  `yaml:"defaults"`
+		Records             map[string]interface{}  `yaml:"records"`
+		HealthcheckProfiles map[string]*HealthCheck `yaml:"healthcheck_profiles"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("failed to parse YAML configuration: %w", err)
+	}
+	gslb.HealthcheckProfiles = raw.HealthcheckProfiles
+	if gslb.Records == nil {
+		gslb.Records = make(map[string]map[string]*Record)
+	}
+	if gslb.Records[zone] == nil {
+		gslb.Records[zone] = make(map[string]*Record)
+	}
+
+	for fqdn, recordData := range raw.Records {
+		var merged map[string]interface{}
+
+		// handle defaults
+		if raw.Defaults != nil {
+			recordMap, ok := recordData.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("record %s is not a map", fqdn)
+			}
+			merged = make(map[string]interface{})
+			// copy defaults
+			for k, v := range raw.Defaults {
+				merged[k] = v
+			}
+			// copy record data
+			for k, v := range recordMap {
+				merged[k] = v
+			}
+		} else {
+			var ok bool
+			merged, ok = recordData.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("record %s is not a map", fqdn)
+			}
+		}
+		processedRecordData, err := (&GSLB{HealthcheckProfiles: raw.HealthcheckProfiles}).processRecordHealthchecks(merged)
+		if err != nil {
+			return fmt.Errorf("error processing record %s: %w", fqdn, err)
+		}
+		recordBytes, err := yaml.Marshal(processedRecordData)
+		if err != nil {
+			return fmt.Errorf("failed to marshal processed record %s: %w", fqdn, err)
+		}
+		var record Record
+		if err := yaml.Unmarshal(recordBytes, &record); err != nil {
+			return fmt.Errorf("failed to unmarshal record %s: %w", fqdn, err)
+		}
+		record.Fqdn = fqdn
+		record.Zone = zone
+		gslb.Records[zone][fqdn] = &record
+	}
+	return nil
+}
