@@ -1,0 +1,98 @@
+site_name: CoreDNS-GSLB
+site_description: Global Server Load Balancing plugin for CoreDNS
+site_author: dmachard
+site_url: https://dmachard.github.io/CoreDNS-GSLB/
+repo_name: dmachard/CoreDNS-GSLB
+repo_url: https://github.com/dmachard/CoreDNS-GSLB
+
+theme:
+  name: material
+  logo: coredns_gslb_logo.svg
+  font:
+    text: Outfit
+    code: JetBrains Mono
+  palette:
+    # Light mode (default)
+    - scheme: default
+      primary: slate
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+    # Dark mode
+    - scheme: slate
+      primary: slate
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+watch:
+  - docs
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - attr_list
+  - md_in_html
+  - admonition
+  - pymdownx.details
+
+nav:
+  - Home: index.md
+  - Get Started:
+      - Download: download.md
+      - Installation: installation.md
+      - Quick Start: getting_started.md
+      - Corefile: configuration.md
+      - Zone YAML: zone_configuration.md
+  - Features:
+      - Supported Records: records.md
+      - GSLB Modes: modes.md
+      - Backend Discovery: discovery.md
+      - Health Checks: healthchecks.md
+      - Cluster Mode: cluster_mode.md
+      - State Persistence: state_persistence.md
+      - Offloaded Probing: offloaded_probing.md
+      - GeoIP Routing: geoip.md
+      - ECS Support: ecs.md
+  - Operations:
+      - REST API: api.md
+      - CLI Tool: cli.md
+      - Observability: observability.md
+      - Troubleshooting: troubleshooting.md
+  - Deployments:
+      - Standalone Mode: deployments/standalone.md
+      - Cluster Mode: deployments/clustering.md
+      - Offloaded Probing: deployments/offloaded.md
+      - Anycast & BGP (RHI): deployments/rhi.md
+      - Consul Integration: deployments/consul.md
+  - Performance:
+      - Resource Benchmarks: performance/benchmarks.md
+      - Run Benchmarks: performance/run_benchmarks.md
+  - For Developers:
+      - Guidelines: developer/contributing.md
+      - Dev Environment: developer/dev_environment.md
+      - Binary Compilation: developer/compilation.md
+      - Running Tests: developer/testing.md
