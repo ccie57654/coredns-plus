@@ -83,7 +83,7 @@ dockers_v2:
     - "{{ .Tag }}"
   annotations:
     "org.opencontainers.image.description": "Custom compilation of CoreDNS"
-    "org.opencontainers.image.created": {{.Now.Format "2006-01-02"}}
+    "org.opencontainers.image.created": "{{.Now.Format \"2006-01-02]\"}}"
     "org.opencontainers.image.name": "{{.ProjectName}}"
     "org.opencontainers.image.revision": "{{.FullCommit}}"
     "org.opencontainers.image.version": "{{.Version}}"
