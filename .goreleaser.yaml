@@ -50,7 +50,7 @@ archives:
     wrap_in_directory: true
     name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
     builds_info:
-      mtime: "{{ .CommitTimestamp }}"
+      mtime: "{{ .CommitDate }}"
     # use zip for windows archives
     format_overrides:
       - goos: windows
