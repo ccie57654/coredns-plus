@@ -50,7 +50,7 @@ archives:
     wrap_in_directory: true
     name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
     builds_info:
-      mtime: "{{ .CommitTimestamp }}"
+      mtime: "{{ .CommitDate }}"
     # use zip for windows archives
     format_overrides:
       - goos: windows
@@ -69,6 +69,8 @@ signs:
       - "sign-blob"
       - "--bundle=${signature}"
       - "${artifact}"
+      - "--yes"
+
     artifacts: checksum
     output: true
 
@@ -81,7 +83,7 @@ dockers_v2:
   tags:
     - "latest"
     - "{{ .Tag }}"
-  annotations:
+  labels:
     "org.opencontainers.image.description": "Custom compilation of CoreDNS"
     "org.opencontainers.image.created": "{{.Date}}"
     "org.opencontainers.image.name": "{{.ProjectName}}"
