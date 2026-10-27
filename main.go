@@ -26,6 +26,7 @@ import (
 	_ "github.com/coredns/coredns/plugin/dns64"
 	_ "github.com/coredns/coredns/plugin/dnssec"
 	_ "github.com/coredns/coredns/plugin/dnstap"
+	_ "github.com/coredns/coredns/plugin/dynupdate"
 	_ "github.com/coredns/coredns/plugin/erratic"
 	_ "github.com/coredns/coredns/plugin/errors"
 
@@ -68,6 +69,7 @@ import (
 	_ "github.com/coredns/coredns/plugin/secondary"
 	_ "github.com/coredns/coredns/plugin/shed"
 	_ "github.com/coredns/coredns/plugin/sign"
+	_ "github.com/coredns/coredns/plugin/siit"
 	_ "github.com/coredns/coredns/plugin/template"
 	_ "github.com/coredns/coredns/plugin/timeouts"
 	_ "github.com/coredns/coredns/plugin/tls"
@@ -80,7 +82,6 @@ import (
 )
 
 var directives = []string{
-	"rrl",
 	"root",
 	"metadata",
 	"cancel",
@@ -104,6 +105,7 @@ var directives = []string{
 	"dnstap",
 	"local",
 	"dns64",
+	"siit",
 	"any",
 	"tsig",
 	"rewrite",
@@ -115,6 +117,7 @@ var directives = []string{
 	"tls",
 	"template",
 	"transfer",
+	"dynupdate",
 	"hosts",
 	"gslb",
 	"file",
